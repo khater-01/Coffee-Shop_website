@@ -28,6 +28,24 @@
   --shadow-lg: 0 16px 48px rgba(26, 60, 52, .18);
 }
 
+/* ── Dark Mode Variables ── */
+[data-theme="dark"] {
+  --green: #0D1F1A;
+  --green-light: #1A3C34;
+  --green-dark: #080F0C;
+  --cream: #1A1E1C;
+  --cream-dark: #141816;
+  --cream-light: #1E2422;
+  --accent: #D4B896;
+  --accent-dark: #B89A74;
+  --gold: #E0B85A;
+  --white: #1A1E1C;
+  --text-dark: #E8E0D0;
+  --text-muted: #8A9E96;
+  --shadow: 0 8px 32px rgba(0, 0, 0, .3);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, .4);
+}
+
 html {
   scroll-behavior: smooth;
   font-size: 16px

@@ -94,6 +94,21 @@ const MENU = {
   ],
 };
 
+// Category display names
+const CATEGORY_NAMES = {
+  hot: 'Hot Coffee',
+  iced: 'Iced Coffee',
+  frappe: 'Frappe',
+  matcha: 'Matcha',
+  milkshake: 'Milkshakes',
+  smoothie: 'Smoothies',
+  mojito: 'Mojitos',
+  bakery: 'Bakery',
+  pastry: 'Pastry',
+  savory: 'Savory',
+  drinks: 'Soft Drinks',
+};
+
 // Professional SVG icons for each menu category
 const ICONS = {
   hot: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" y1="2" x2="6" y2="4"/><line x1="10" y1="2" x2="10" y2="4"/><line x1="14" y1="2" x2="14" y2="4"/></svg>`,
@@ -109,21 +124,9 @@ const ICONS = {
   drinks: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h8l-1 18H9L8 2z"/><path d="M7 6h10"/><path d="M9 10h6"/><circle cx="12" cy="14" r="1.5" fill="currentColor" stroke="none" opacity=".2"/></svg>`,
 };
 
-// ── Cart State ──
-let cart = [];
-
 // ── DOM References ──
 const menuGrid = document.getElementById('menuGrid');
 const menuTabs = document.getElementById('menuTabs');
-const cartDrawer = document.getElementById('cartDrawer');
-const cartOverlay = document.getElementById('cartOverlay');
-const cartItems = document.getElementById('cartItems');
-const cartEmpty = document.getElementById('cartEmpty');
-const cartFooter = document.getElementById('cartFooter');
-const cartTotal = document.getElementById('cartTotal');
-const cartBadge = document.getElementById('cartBadge');
-const toast = document.getElementById('toast');
-const toastText = document.getElementById('toastText');
 
 // ══════════════ MENU RENDERING ══════════════
 function renderMenu(category) {
@@ -146,7 +149,6 @@ function renderMenu(category) {
         </div>
         <div class="menu-item-right">
           <span class="menu-item-price">${item.price} EGP</span>
-          <button class="btn-add" aria-label="Add ${item.name}">+</button>
         </div>
       </div>
     `).join('');
@@ -157,20 +159,6 @@ function renderMenu(category) {
     // Re-observe fade-ups
     menuGrid.querySelectorAll('.fade-up').forEach(el => {
       el.classList.add('visible');
-    });
-
-    // Attach add-to-cart events
-    menuGrid.querySelectorAll('.menu-item').forEach(item => {
-      const addBtn = item.querySelector('.btn-add');
-      const addHandler = (e) => {
-        e.stopPropagation();
-        addToCart(item.dataset.name, parseInt(item.dataset.price));
-        addBtn.classList.remove('added');
-        void addBtn.offsetWidth;
-        addBtn.classList.add('added');
-      };
-      addBtn.addEventListener('click', addHandler);
-      item.addEventListener('click', addHandler);
     });
   }, 200);
 }
@@ -186,115 +174,174 @@ menuTabs.addEventListener('click', e => {
 // Initial render
 renderMenu('hot');
 
-// ══════════════ CART SYSTEM ══════════════
-function addToCart(name, price) {
-  const existing = cart.find(item => item.name === name);
-  if (existing) {
-    existing.qty++;
-  } else {
-    cart.push({ name, price, qty: 1 });
+// ══════════════ SEARCH SYSTEM ══════════════
+const searchPanel = document.getElementById('searchPanel');
+const searchOverlay = document.getElementById('searchOverlay');
+const searchInput = document.getElementById('searchInput');
+const searchResults = document.getElementById('searchResults');
+const searchEmpty = document.getElementById('searchEmpty');
+
+// Build a flat searchable index from all menu categories
+function buildSearchIndex() {
+  const index = [];
+  for (const [category, items] of Object.entries(MENU)) {
+    items.forEach(item => {
+      index.push({
+        ...item,
+        category,
+        categoryName: CATEGORY_NAMES[category] || category,
+        icon: ICONS[category] || '☕',
+      });
+    });
   }
-  updateCartUI();
-  showToast(`${name} added!`);
+  return index;
+}
+const searchIndex = buildSearchIndex();
+
+function openSearch() {
+  searchPanel.classList.add('open');
+  searchOverlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => searchInput.focus(), 100);
 }
 
-function removeFromCart(name) {
-  cart = cart.filter(item => item.name !== name);
-  updateCartUI();
+function closeSearch() {
+  searchPanel.classList.remove('open');
+  searchOverlay.classList.remove('open');
+  document.body.style.overflow = '';
+  searchInput.value = '';
+  renderSearchResults('');
 }
 
-function updateQty(name, delta) {
-  const item = cart.find(i => i.name === name);
-  if (!item) return;
-  item.qty += delta;
-  if (item.qty <= 0) {
-    removeFromCart(name);
+function highlightMatch(text, query) {
+  if (!query) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escaped})`, 'gi');
+  return text.replace(regex, '<mark>$1</mark>');
+}
+
+function renderSearchResults(query) {
+  const trimmed = query.trim().toLowerCase();
+
+  if (!trimmed) {
+    searchEmpty.style.display = 'block';
+    searchEmpty.querySelector('p').textContent = 'Start typing to search our menu';
+    // Remove old result items
+    searchResults.querySelectorAll('.search-result-group').forEach(el => el.remove());
     return;
   }
-  updateCartUI();
-}
 
-function updateCartUI() {
-  const totalItems = cart.reduce((s, i) => s + i.qty, 0);
-  const totalPrice = cart.reduce((s, i) => s + i.price * i.qty, 0);
+  // Filter items
+  const matches = searchIndex.filter(item =>
+    item.name.toLowerCase().includes(trimmed) ||
+    (item.desc && item.desc.toLowerCase().includes(trimmed)) ||
+    item.categoryName.toLowerCase().includes(trimmed)
+  );
 
-  // Badge
-  cartBadge.textContent = totalItems;
-  cartBadge.classList.remove('bounce');
-  void cartBadge.offsetWidth;
-  cartBadge.classList.add('bounce');
+  // Remove old result items
+  searchResults.querySelectorAll('.search-result-group').forEach(el => el.remove());
 
-  if (cart.length === 0) {
-    cartEmpty.style.display = 'block';
-    cartFooter.style.display = 'none';
-    // Clear cart items except empty message
-    const existingItems = cartItems.querySelectorAll('.cart-item');
-    existingItems.forEach(el => el.remove());
-  } else {
-    cartEmpty.style.display = 'none';
-    cartFooter.style.display = 'block';
-    cartTotal.textContent = totalPrice + ' EGP';
-
-    // Rebuild items
-    const existingItems = cartItems.querySelectorAll('.cart-item');
-    existingItems.forEach(el => el.remove());
-
-    cart.forEach(item => {
-      const div = document.createElement('div');
-      div.className = 'cart-item';
-      div.innerHTML = `
-        <div class="cart-item-info">
-          <h4>${item.name}</h4>
-          <span class="cart-item-price">${item.price} EGP each</span>
-        </div>
-        <div class="cart-qty">
-          <button class="qty-minus" data-name="${item.name}">−</button>
-          <span>${item.qty}</span>
-          <button class="qty-plus" data-name="${item.name}">+</button>
-        </div>
-      `;
-      cartItems.appendChild(div);
-    });
-
-    // Attach qty events
-    cartItems.querySelectorAll('.qty-minus').forEach(btn => {
-      btn.addEventListener('click', () => updateQty(btn.dataset.name, -1));
-    });
-    cartItems.querySelectorAll('.qty-plus').forEach(btn => {
-      btn.addEventListener('click', () => updateQty(btn.dataset.name, 1));
-    });
+  if (matches.length === 0) {
+    searchEmpty.style.display = 'block';
+    searchEmpty.querySelector('p').innerHTML = `No results for "<strong>${query}</strong>"`;
+    return;
   }
+
+  searchEmpty.style.display = 'none';
+
+  // Group by category
+  const grouped = {};
+  matches.forEach(item => {
+    if (!grouped[item.category]) grouped[item.category] = [];
+    grouped[item.category].push(item);
+  });
+
+  // Render grouped results
+  for (const [category, items] of Object.entries(grouped)) {
+    const group = document.createElement('div');
+    group.className = 'search-result-group';
+    group.innerHTML = `
+      <div class="search-result-category">${CATEGORY_NAMES[category] || category}</div>
+      ${items.map((item, i) => `
+        <div class="search-result-item" style="animation-delay:${i * 30}ms" data-category="${category}">
+          <div class="search-result-left">
+            <div class="search-result-icon">${item.icon}</div>
+            <div>
+              <div class="search-result-name">${highlightMatch(item.name, query)}</div>
+              ${item.desc ? `<div class="search-result-desc">${highlightMatch(item.desc, query)}</div>` : ''}
+            </div>
+          </div>
+          <div class="search-result-price">${item.price} EGP</div>
+        </div>
+      `).join('')}
+    `;
+    searchResults.appendChild(group);
+  }
+
+  // Add click listeners to navigate to category in menu
+  searchResults.querySelectorAll('.search-result-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const cat = el.dataset.category;
+      // Close search
+      closeSearch();
+      // Scroll to menu section
+      document.getElementById('menu').scrollIntoView({ behavior: 'smooth' });
+      // Switch to the correct tab
+      setTimeout(() => {
+        const tabBtn = menuTabs.querySelector(`button[data-cat="${cat}"]`);
+        if (tabBtn) {
+          menuTabs.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+          tabBtn.classList.add('active');
+          renderMenu(cat);
+        }
+      }, 400);
+    });
+  });
 }
 
-// ── Cart open/close ──
-document.getElementById('cartToggle').addEventListener('click', () => {
-  cartDrawer.classList.add('open');
-  cartOverlay.classList.add('open');
+// Event listeners for search
+document.getElementById('searchToggle').addEventListener('click', openSearch);
+document.getElementById('searchClose').addEventListener('click', closeSearch);
+searchOverlay.addEventListener('click', closeSearch);
+
+searchInput.addEventListener('input', e => {
+  renderSearchResults(e.target.value);
 });
-document.getElementById('cartClose').addEventListener('click', closeCart);
-cartOverlay.addEventListener('click', closeCart);
-function closeCart() {
-  cartDrawer.classList.remove('open');
-  cartOverlay.classList.remove('open');
-}
 
-// ── Checkout ──
-document.getElementById('btnCheckout').addEventListener('click', () => {
-  const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
-  showToast(`Order placed! Total: ${total} EGP 🎉`);
-  cart = [];
-  updateCartUI();
-  setTimeout(closeCart, 800);
+// Keyboard shortcut: ESC to close, Ctrl+K to open
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && searchPanel.classList.contains('open')) {
+    closeSearch();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    if (searchPanel.classList.contains('open')) {
+      closeSearch();
+    } else {
+      openSearch();
+    }
+  }
 });
 
-// ══════════════ TOAST ══════════════
-let toastTimeout;
-function showToast(msg) {
-  clearTimeout(toastTimeout);
-  toastText.textContent = msg;
-  toast.classList.add('show');
-  toastTimeout = setTimeout(() => toast.classList.remove('show'), 2500);
+// ══════════════ DARK MODE ══════════════
+const darkModeToggle = document.getElementById('darkModeToggle');
+const savedTheme = localStorage.getItem('brunee-theme');
+
+// Apply saved theme on load
+if (savedTheme === 'dark') {
+  document.documentElement.setAttribute('data-theme', 'dark');
 }
+
+darkModeToggle.addEventListener('click', () => {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  if (isDark) {
+    document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('brunee-theme', 'light');
+  } else {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    localStorage.setItem('brunee-theme', 'dark');
+  }
+});
 
 // ══════════════ NAVBAR ══════════════
 const navbar = document.getElementById('navbar');
@@ -345,15 +392,8 @@ const observer = new IntersectionObserver(entries => {
 }, { threshold: 0.15 });
 document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
 
-// ── Best sellers card add-to-cart ──
-document.querySelectorAll('.btn-order').forEach(btn => {
-  btn.addEventListener('click', () => {
-    addToCart(btn.dataset.name, parseInt(btn.dataset.price));
-  });
-});
-
 // ── Carousel arrows (visual bounce) ──
-['prodPrev','prodNext','testPrev','testNext'].forEach(id => {
+['prodPrev', 'prodNext', 'testPrev', 'testNext'].forEach(id => {
   const btn = document.getElementById(id);
   if (btn) btn.addEventListener('click', () => {
     btn.style.transform = 'translateY(-50%) scale(.92)';
